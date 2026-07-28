@@ -1,6 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+// Normalize API_BASE URL dynamically
+const rawApiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+const cleanBase = rawApiBase.replace(/\/+$/, '');
+const API_BASE = cleanBase.endsWith('/api') ? cleanBase : `${cleanBase}/api`;
+
+// Safe JSON fetch helper to prevent "Unexpected token '<'" error on non-JSON HTML error responses
+async function safeFetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get('content-type') || '';
+
+  if (!contentType.includes('application/json')) {
+    if (res.status === 404) {
+      throw new Error(`API endpoint not found (404). Verify your VITE_API_BASE environment variable in Vercel settings.`);
+    }
+    if (res.status === 502 || res.status === 503) {
+      throw new Error('Backend server is waking up or starting (502/503). Please wait 15 seconds and try again.');
+    }
+    throw new Error(`Server returned HTML response (${res.status}). Ensure the Render backend is live.`);
+  }
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Server error (${res.status})`);
+  }
+  return data;
+}
 
 export default function App() {
   // Navigation & UI state
@@ -53,41 +78,32 @@ export default function App() {
 
   const fetchModelInfo = async () => {
     try {
-      const res = await fetch(`${API_BASE}/model/info`);
-      if (res.ok) {
-        const data = await res.json();
-        setModelInfo(data);
-      }
+      const data = await safeFetchJson(`${API_BASE}/model/info`);
+      setModelInfo(data);
     } catch (err) {
-      console.warn('Backend server not reached yet for model info', err);
+      console.warn('Backend server info check:', err.message);
     }
   };
 
   const fetchDatasetStats = async () => {
     try {
-      const res = await fetch(`${API_BASE}/dataset/stats`);
-      if (res.ok) {
-        const data = await res.json();
-        setDatasetStats(data);
-      }
+      const data = await safeFetchJson(`${API_BASE}/dataset/stats`);
+      setDatasetStats(data);
     } catch (err) {
-      console.warn('Backend server not reached yet for dataset stats', err);
+      console.warn('Backend dataset stats check:', err.message);
     }
   };
 
   const fetchTrainingStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE}/train/status`);
-      if (res.ok) {
-        const data = await res.json();
-        setTrainingState(data);
-        setIsTraining(data.is_training);
-        if (data.status === 'completed') {
-          fetchModelInfo();
-        }
+      const data = await safeFetchJson(`${API_BASE}/train/status`);
+      setTrainingState(data);
+      setIsTraining(data.is_training);
+      if (data.status === 'completed') {
+        fetchModelInfo();
       }
     } catch (err) {
-      console.warn('Could not fetch training status', err);
+      console.warn('Training status check:', err.message);
     }
   };
 
@@ -136,16 +152,10 @@ export default function App() {
     formData.append('image', selectedFile);
 
     try {
-      const res = await fetch(`${API_BASE}/predict`, {
+      const data = await safeFetchJson(`${API_BASE}/predict`, {
         method: 'POST',
         body: formData,
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to analyze image');
-      }
 
       setAnalysisResult(data);
     } catch (err) {
@@ -161,24 +171,17 @@ export default function App() {
     setPasswordError('');
 
     try {
-      const res = await fetch(`${API_BASE}/train`, {
+      await safeFetchJson(`${API_BASE}/train`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: trainingPassword }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setPasswordError(data.error || 'Authentication failed');
-        return;
-      }
-
       setIsTraining(true);
       setTrainingPassword('');
       fetchTrainingStatus();
     } catch (err) {
-      setPasswordError('Failed to trigger training process');
+      setPasswordError(err.message || 'Failed to trigger training process');
     }
   };
 
