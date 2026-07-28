@@ -196,4 +196,5 @@ if __name__ == "__main__":
     else:
         print("⚠️  No trained model found. Train via Settings panel.")
 
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    port = int(os.environ.get("PORT", PORT))
+    app.run(host=HOST, port=port, debug=DEBUG)
